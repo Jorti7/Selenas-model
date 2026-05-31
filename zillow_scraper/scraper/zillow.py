@@ -69,30 +69,40 @@ def _parse_listings_from_page_data(data: dict) -> tuple[list[dict], int]:
                 continue
 
             lat_lon = item.get('latLong', {})
-            lot_raw = item.get('lotAreaValue')
-            lot_unit = item.get('lotAreaUnit', 'sqft')
+            # lotAreaValue lives in homeInfo, not at the top level
+            lot_raw = hd.get('lotAreaValue') or item.get('lotAreaValue')
+            lot_unit = hd.get('lotAreaUnit') or item.get('lotAreaUnit') or 'sqft'
             lot_sqft = _to_sqft(lot_raw, lot_unit)
 
-            hoa = hd.get('hoaFee') or item.get('hdpData', {}).get('homeInfo', {}).get('monthlyHoaFee')
+            hoa = hd.get('hoaFee') or hd.get('monthlyHoaFee')
+
+            # detailUrl is already a full URL from Zillow
+            detail_url = item.get('detailUrl', '')
+            if detail_url and not detail_url.startswith('http'):
+                detail_url = 'https://www.zillow.com' + detail_url
+
+            # Price comes as formatted string like "$367,000" or as unformattedPrice int
+            price_raw = item.get('unformattedPrice') or item.get('price', '')
+            price = _safe_int(str(price_raw).replace('$', '').replace(',', '').replace('+', ''))
 
             listing = {
                 'zillow_id': str(item.get('zpid', '')),
-                'address': item.get('address', ''),
-                'city': hd.get('city', ''),
-                'zip_code': str(hd.get('zipcode', '')),
-                'lat': lat_lon.get('latitude'),
-                'lon': lat_lon.get('longitude'),
-                'price': _safe_int(item.get('price', '').replace('$', '').replace(',', '').replace('+', '')),
-                'beds': _safe_int(item.get('beds')),
-                'baths': _safe_float(item.get('baths')),
-                'living_sqft': _safe_int(item.get('area')),
+                'address': item.get('addressStreet') or item.get('address', ''),
+                'city': item.get('addressCity') or hd.get('city', ''),
+                'zip_code': str(item.get('addressZipcode') or hd.get('zipcode', '')),
+                'lat': lat_lon.get('latitude') or hd.get('latitude'),
+                'lon': lat_lon.get('longitude') or hd.get('longitude'),
+                'price': price,
+                'beds': _safe_int(item.get('beds') or hd.get('bedrooms')),
+                'baths': _safe_float(item.get('baths') or hd.get('bathrooms')),
+                'living_sqft': _safe_int(item.get('area') or hd.get('livingArea')),
                 'lot_sqft': lot_sqft,
                 'year_built': _safe_int(hd.get('yearBuilt')),
                 'hoa_monthly': _safe_int(hoa),
-                'dom': _safe_int(item.get('daysOnZillow') or hd.get('daysOnZillow')),
+                'dom': _safe_int(hd.get('daysOnZillow') or item.get('daysOnZillow')),
                 'list_date': hd.get('datePostedString', ''),
                 'property_type': home_type,
-                'listing_url': 'https://www.zillow.com' + item.get('detailUrl', ''),
+                'listing_url': detail_url,
                 'thumbnail_url': item.get('imgSrc', ''),
             }
             if listing['zillow_id']:
@@ -142,10 +152,11 @@ def scrape_zillow(config: dict) -> list[dict]:
         return []
 
     all_listings = []
+    seen_ids: set[str] = set()
     page = 1
-    max_pages = 20  # safety cap (~800 listings)
+    max_pages = 20  # safety cap
 
-    fetcher = DynamicFetcher(auto_match=False)
+    fetcher = DynamicFetcher()
 
     while page <= max_pages:
         url = _build_search_url(config, page)
@@ -157,17 +168,18 @@ def scrape_zillow(config: dict) -> list[dict]:
                 headless=True,
                 network_idle=True,
                 timeout=60000,
+                # Allow sandbox TLS interception proxy
+                extra_flags=['--ignore-certificate-errors', '--ignore-ssl-errors'],
             )
         except Exception as exc:
             logger.error("DynamicFetcher error on page %d: %s", page, exc)
             break
 
-        # Extract __NEXT_DATA__ embedded JSON
-        next_data_tag = result.find('script#__NEXT_DATA__', first=True)
+        # Extract __NEXT_DATA__ embedded JSON (find() returns first match or None)
+        next_data_tag = result.find('script#__NEXT_DATA__')
         if next_data_tag is None:
-            # Fallback: try json-ld or embedded window.__data__
             logger.warning("__NEXT_DATA__ not found on page %d, trying fallback", page)
-            next_data_tag = result.find('script[id="__NEXT_DATA__"]', first=True)
+            next_data_tag = result.find('script[id="__NEXT_DATA__"]')
 
         if next_data_tag is None:
             logger.error("Could not find page data on page %d. Zillow may have blocked the request.", page)
@@ -180,15 +192,28 @@ def scrape_zillow(config: dict) -> list[dict]:
             break
 
         listings, total = _parse_listings_from_page_data(page_data)
-        logger.info("Page %d: got %d listings (total reported: %d)", page, len(listings), total)
+        logger.info("Page %d: got %d listings (total reported: %s)", page, len(listings), total or 'N/A')
 
         if not listings:
             break
 
+        # Dedup check: if more than half the page IDs are ones we've seen, Zillow is cycling
+        page_ids = {l['zillow_id'] for l in listings}
+        overlap = page_ids & seen_ids
+        if len(overlap) > len(page_ids) * 0.5:
+            logger.info("Page %d has %d/%d duplicate IDs — reached end of results", page, len(overlap), len(page_ids))
+            # Still add the new ones
+            new_on_page = [l for l in listings if l['zillow_id'] not in seen_ids]
+            all_listings.extend(new_on_page)
+            break
+
+        seen_ids.update(page_ids)
         all_listings.extend(listings)
 
-        # Check if we've collected all results
-        if len(all_listings) >= total or len(listings) < 40:
+        # Stop when we've collected all results or received a partial page (last page)
+        if total and len(all_listings) >= total:
+            break
+        if len(listings) < 40:
             break
 
         page += 1

@@ -15,8 +15,11 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-FEMA_NFHL_URL = (
-    "https://hazards.fema.gov/gis/nfhl/rest/services/public/NFHL/MapServer/28/query"
+FEMA_ZONE_URL = (
+    "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/28/query"
+)
+FEMA_BFE_URL = (
+    "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer/16/query"
 )
 HCAD_SEARCH_URL = "https://pdata.hcad.org/PDATA/addr-building-value"
 
@@ -60,17 +63,22 @@ def enrich_flood_data(listings: list[dict]) -> list[dict]:
 
 
 def _query_fema(lat: float, lon: float) -> dict:
-    params = {
+    """Query FEMA NFHL for flood zone (layer 28) and nearest BFE (layer 16)."""
+    base_params = {
         'geometry': f'{lon},{lat}',
         'geometryType': 'esriGeometryPoint',
         'inSR': '4326',
         'spatialRel': 'esriSpatialRelIntersects',
-        'outFields': 'FLD_ZONE,BFE_DIVA,STUDY_TYP,SFHA_TF',
         'returnGeometry': 'false',
         'f': 'json',
     }
     try:
-        resp = requests.get(FEMA_NFHL_URL, params=params, timeout=10)
+        # Flood zone
+        resp = requests.get(
+            FEMA_ZONE_URL,
+            params={**base_params, 'outFields': 'FLD_ZONE,SFHA_TF'},
+            timeout=10,
+        )
         resp.raise_for_status()
         data = resp.json()
         features = data.get('features', [])
@@ -78,8 +86,28 @@ def _query_fema(lat: float, lon: float) -> dict:
             return {}
         attrs = features[0].get('attributes', {})
         zone = (attrs.get('FLD_ZONE') or '').strip().upper()
-        bfe_raw = attrs.get('BFE_DIVA')
-        bfe = float(bfe_raw) if bfe_raw not in (None, -9999, '-9999') else None
+
+        # BFE — search within 500 m of the point (BFE is a line feature)
+        bfe = None
+        bfe_resp = requests.get(
+            FEMA_BFE_URL,
+            params={
+                **base_params,
+                'outFields': 'ELEV,LEN_UNIT',
+                'distance': 500,
+                'units': 'esriSRUnit_Meter',
+                'spatialRel': 'esriSpatialRelIntersects',
+            },
+            timeout=10,
+        )
+        if bfe_resp.ok:
+            bfe_data = bfe_resp.json()
+            bfe_features = bfe_data.get('features', [])
+            if bfe_features:
+                elev = bfe_features[0].get('attributes', {}).get('ELEV')
+                if elev not in (None, -9999, -9998):
+                    bfe = float(elev)
+
         return {'flood_zone': zone or 'Unknown', 'bfe': bfe}
     except Exception as exc:
         logger.warning("FEMA API error for (%s, %s): %s", lat, lon, exc)
