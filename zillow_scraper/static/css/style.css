@@ -158,7 +158,27 @@ img { display: block; max-width: 100%; }
 .feedback-row-large .btn-feedback { flex: 1; padding: 10px; font-size: 14px; }
 .muted { font-size: 12px; color: #9ca3af; }
 
+/* Tour / sub-type badges */
+.badge-tour { background: #ede9fe; color: #6d28d9; }
+.badge-subtype { color: #fff; }
+.badge-subtype-new-construction { background: #0891b2; }
+.badge-subtype-foreclosure { background: #b91c1c; }
+.badge-subtype-fsbo { background: #7c3aed; }
+.badge-subtype-bank-owned { background: #92400e; }
+.badge-row-sm { display: flex; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
+
+/* Detail sub-sections (schools, parking) */
+.detail-subsection { background: #f9fafb; border-radius: 6px; padding: 10px 12px; margin-bottom: 10px; }
+.detail-subsection h4 { font-size: 11px; font-weight: 700; text-transform: uppercase; color: #9ca3af; margin-bottom: 6px; letter-spacing: 0.05em; }
+.agent-info, .open-house-info { font-size: 12px; color: #374151; margin: 4px 0; }
+
+/* Dashboard card extras */
+.listing-garage { font-size: 11px; color: #374151; margin-top: 3px; }
+.listing-zestimate { font-size: 11px; color: #6b7280; margin-top: 2px; }
+.price-drop-text { color: #dc2626; font-weight: 700; }
+
 /* Misc */
+.relist-flag { font-size: 14px; color: #d97706; margin-left: 4px; }
 .empty-state { text-align: center; padding: 60px 20px; color: #6b7280; }
 @media (max-width: 768px) {
   .page-wrap { grid-template-columns: 1fr; }

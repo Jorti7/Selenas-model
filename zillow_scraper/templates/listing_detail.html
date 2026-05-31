@@ -42,6 +42,74 @@
         <div class="fact"><label>Days on Market</label><span>{{ listing.dom or 'N/A' }}</span></div>
         <div class="fact"><label>List Date</label><span>{{ listing.list_date or 'N/A' }}</span></div>
         <div class="fact"><label>Match Score</label><span>{{ (listing.ml_score * 100)|int }}%</span></div>
+        {% if listing.zestimate %}
+        <div class="fact"><label>Zestimate</label><span>${{ '{:,}'.format(listing.zestimate) }}</span></div>
+        {% endif %}
+        {% if listing.tax_annual %}
+        <div class="fact"><label>Annual Tax</label><span>${{ '{:,}'.format(listing.tax_annual) }}</span></div>
+        {% endif %}
+        {% if listing.price_reduction %}
+        <div class="fact"><label>Price Reduction</label><span class="price-drop-text">&minus;${{ '{:,}'.format(listing.price_reduction) }}</span></div>
+        {% endif %}
+      </div>
+
+      <!-- Garage / Parking -->
+      {% if listing.has_garage or listing.garage_spaces or listing.parking_type %}
+      <div class="detail-subsection">
+        <h4>Parking</h4>
+        <div class="fact-grid">
+          {% if listing.garage_spaces is not none %}
+          <div class="fact"><label>Garage Spaces</label><span>{{ listing.garage_spaces }}</span></div>
+          {% endif %}
+          {% if listing.has_garage is not none %}
+          <div class="fact"><label>Has Garage</label><span>{{ 'Yes' if listing.has_garage else 'No' }}</span></div>
+          {% endif %}
+          {% if listing.parking_type %}
+          <div class="fact"><label>Parking Type</label><span>{{ listing.parking_type }}</span></div>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Schools -->
+      {% if listing.school_elementary or listing.school_middle or listing.school_high %}
+      <div class="detail-subsection">
+        <h4>Schools</h4>
+        <div class="fact-grid">
+          {% if listing.school_elementary %}
+          <div class="fact"><label>Elementary</label><span>{{ listing.school_elementary }}</span></div>
+          {% endif %}
+          {% if listing.school_middle %}
+          <div class="fact"><label>Middle</label><span>{{ listing.school_middle }}</span></div>
+          {% endif %}
+          {% if listing.school_high %}
+          <div class="fact"><label>High School</label><span>{{ listing.school_high }}</span></div>
+          {% endif %}
+        </div>
+      </div>
+      {% endif %}
+
+      <!-- Agent / Open House -->
+      {% if listing.listing_agent or listing.open_house_start %}
+      <div class="detail-subsection">
+        {% if listing.listing_agent %}
+        <p class="agent-info"><strong>Agent:</strong> {{ listing.listing_agent }}</p>
+        {% endif %}
+        {% if listing.open_house_start %}
+        <p class="open-house-info"><strong>Open House:</strong> {{ listing.open_house_start }}</p>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      <!-- Special badges -->
+      <div class="badge-row-sm">
+        {% if listing.has_3d_tour %}<span class="badge badge-tour">3D Tour</span>{% endif %}
+        {% if listing.has_virtual_tour %}<span class="badge badge-tour">Virtual Tour</span>{% endif %}
+        {% if listing.listing_sub_type and listing.listing_sub_type != 'standard' %}
+        <span class="badge badge-subtype badge-subtype-{{ listing.listing_sub_type }}">
+          {{ listing.listing_sub_type | replace('_', ' ') | title }}
+        </span>
+        {% endif %}
       </div>
 
       <a href="{{ listing.listing_url }}" target="_blank" class="btn btn-primary btn-full">View on Zillow &rarr;</a>

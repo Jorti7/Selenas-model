@@ -21,42 +21,59 @@ def init_db(config):
     cur = conn.cursor()
     cur.executescript("""
         CREATE TABLE IF NOT EXISTS listings (
-            zillow_id       TEXT PRIMARY KEY,
-            address         TEXT,
-            city            TEXT,
-            zip_code        TEXT,
-            lat             REAL,
-            lon             REAL,
-            price           INTEGER,
-            beds            INTEGER,
-            baths           REAL,
-            living_sqft     INTEGER,
-            lot_sqft        INTEGER,
-            year_built      INTEGER,
-            hoa_monthly     INTEGER,
-            dom             INTEGER,
-            list_date       TEXT,
-            property_type   TEXT,
-            flood_zone      TEXT,
-            bfe             REAL,
-            ffe             REAL,
-            freeboard       REAL,
-            flood_risk_label TEXT,
-            listing_url     TEXT,
-            thumbnail_url   TEXT,
-            first_seen      TIMESTAMP,
-            last_seen       TIMESTAMP,
-            is_active       INTEGER DEFAULT 1,
-            relisted_from_id TEXT,
-            days_off_market  INTEGER,
-            user_score      INTEGER,
-            ml_score        REAL DEFAULT 0.5
+            zillow_id           TEXT PRIMARY KEY,
+            address             TEXT,
+            city                TEXT,
+            zip_code            TEXT,
+            lat                 REAL,
+            lon                 REAL,
+            price               INTEGER,
+            beds                INTEGER,
+            baths               REAL,
+            living_sqft         INTEGER,
+            lot_sqft            INTEGER,
+            year_built          INTEGER,
+            hoa_monthly         INTEGER,
+            dom                 INTEGER,
+            list_date           TEXT,
+            property_type       TEXT,
+            flood_zone          TEXT,
+            bfe                 REAL,
+            ffe                 REAL,
+            freeboard           REAL,
+            flood_risk_label    TEXT,
+            listing_url         TEXT,
+            thumbnail_url       TEXT,
+            first_seen          TIMESTAMP,
+            last_seen           TIMESTAMP,
+            is_active           INTEGER DEFAULT 1,
+            relisted_from_id    TEXT,
+            days_off_market     INTEGER,
+            user_score          INTEGER,
+            ml_score            REAL DEFAULT 0.5,
+            zestimate           INTEGER,
+            price_reduction     INTEGER,
+            listing_sub_type    TEXT,
+            broker_name         TEXT,
+            has_3d_tour         INTEGER DEFAULT 0,
+            garage_spaces       INTEGER,
+            has_garage          INTEGER,
+            parking_type        TEXT,
+            tax_annual          INTEGER,
+            school_elementary   TEXT,
+            school_middle       TEXT,
+            school_high         TEXT,
+            has_virtual_tour    INTEGER DEFAULT 0,
+            open_house_start    TEXT,
+            listing_agent       TEXT
         );
 
         CREATE TABLE IF NOT EXISTS price_history (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             zillow_id   TEXT NOT NULL,
             price       INTEGER NOT NULL,
+            event       TEXT,
+            event_date  TEXT,
             recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (zillow_id) REFERENCES listings(zillow_id)
         );
@@ -76,8 +93,53 @@ def init_db(config):
         CREATE INDEX IF NOT EXISTS idx_listings_ml_score ON listings(ml_score DESC);
         CREATE INDEX IF NOT EXISTS idx_price_history_zpid ON price_history(zillow_id);
     """)
+
+    # Migrate existing DB: add new columns if they don't exist yet
+    new_columns = [
+        ("zestimate",          "INTEGER"),
+        ("price_reduction",    "INTEGER"),
+        ("listing_sub_type",   "TEXT"),
+        ("broker_name",        "TEXT"),
+        ("has_3d_tour",        "INTEGER DEFAULT 0"),
+        ("garage_spaces",      "INTEGER"),
+        ("has_garage",         "INTEGER"),
+        ("parking_type",       "TEXT"),
+        ("tax_annual",         "INTEGER"),
+        ("school_elementary",  "TEXT"),
+        ("school_middle",      "TEXT"),
+        ("school_high",        "TEXT"),
+        ("has_virtual_tour",   "INTEGER DEFAULT 0"),
+        ("open_house_start",   "TEXT"),
+        ("listing_agent",      "TEXT"),
+    ]
+    existing = {row[1] for row in cur.execute("PRAGMA table_info(listings)").fetchall()}
+    for col_name, col_type in new_columns:
+        if col_name not in existing:
+            cur.execute(f"ALTER TABLE listings ADD COLUMN {col_name} {col_type}")
+
+    # Add event/event_date columns to price_history if missing
+    ph_existing = {row[1] for row in cur.execute("PRAGMA table_info(price_history)").fetchall()}
+    if "event" not in ph_existing:
+        cur.execute("ALTER TABLE price_history ADD COLUMN event TEXT")
+    if "event_date" not in ph_existing:
+        cur.execute("ALTER TABLE price_history ADD COLUMN event_date TEXT")
+
     conn.commit()
     conn.close()
+
+
+_INSERT_COLS = (
+    "zillow_id, address, city, zip_code, lat, lon, price, beds, baths, "
+    "living_sqft, lot_sqft, year_built, hoa_monthly, dom, list_date, property_type, "
+    "listing_url, thumbnail_url, first_seen, last_seen, is_active, "
+    "zestimate, price_reduction, listing_sub_type, broker_name, has_3d_tour"
+)
+_INSERT_VALS = (
+    ":zillow_id, :address, :city, :zip_code, :lat, :lon, :price, :beds, :baths, "
+    ":living_sqft, :lot_sqft, :year_built, :hoa_monthly, :dom, :list_date, :property_type, "
+    ":listing_url, :thumbnail_url, :first_seen, :last_seen, 1, "
+    ":zestimate, :price_reduction, :listing_sub_type, :broker_name, :has_3d_tour"
+)
 
 
 def upsert_listing(conn, listing: dict) -> dict:
@@ -89,26 +151,26 @@ def upsert_listing(conn, listing: dict) -> dict:
 
     result = {'is_new': False, 'price_dropped': False, 'drop_pct': 0.0, 'drop_usd': 0}
 
+    # Ensure new optional fields have defaults for the SQL bind
+    row = {
+        'zestimate': None, 'price_reduction': None,
+        'listing_sub_type': 'standard', 'broker_name': '',
+        'has_3d_tour': 0, 'first_seen': now, 'last_seen': now,
+        **listing,
+    }
+
     if existing is None:
         result['is_new'] = True
-        cur.execute("""
-            INSERT INTO listings
-            (zillow_id, address, city, zip_code, lat, lon, price, beds, baths,
-             living_sqft, lot_sqft, year_built, hoa_monthly, dom, list_date,
-             property_type, listing_url, thumbnail_url, first_seen, last_seen, is_active)
-            VALUES
-            (:zillow_id, :address, :city, :zip_code, :lat, :lon, :price, :beds, :baths,
-             :living_sqft, :lot_sqft, :year_built, :hoa_monthly, :dom, :list_date,
-             :property_type, :listing_url, :thumbnail_url, :first_seen, :last_seen, 1)
-        """, {**listing, 'first_seen': now, 'last_seen': now})
-        cur.execute(
-            "INSERT INTO price_history (zillow_id, price, recorded_at) VALUES (?, ?, ?)",
-            (listing['zillow_id'], listing['price'], now)
-        )
+        cur.execute(f"INSERT INTO listings ({_INSERT_COLS}) VALUES ({_INSERT_VALS})", row)
+        if listing.get('price'):
+            cur.execute(
+                "INSERT INTO price_history (zillow_id, price, recorded_at) VALUES (?, ?, ?)",
+                (listing['zillow_id'], listing['price'], now)
+            )
     else:
         old_price = existing['price']
-        new_price = listing['price']
-        if new_price != old_price:
+        new_price = listing.get('price')
+        if new_price and new_price != old_price:
             cur.execute(
                 "INSERT INTO price_history (zillow_id, price, recorded_at) VALUES (?, ?, ?)",
                 (listing['zillow_id'], new_price, now)
@@ -124,12 +186,55 @@ def upsert_listing(conn, listing: dict) -> dict:
             UPDATE listings
             SET price=:price, beds=:beds, baths=:baths, living_sqft=:living_sqft,
                 lot_sqft=:lot_sqft, hoa_monthly=:hoa_monthly, dom=:dom,
-                thumbnail_url=:thumbnail_url, last_seen=:last_seen, is_active=1
+                thumbnail_url=:thumbnail_url, last_seen=:last_seen, is_active=1,
+                zestimate=COALESCE(:zestimate, zestimate),
+                price_reduction=COALESCE(:price_reduction, price_reduction),
+                listing_sub_type=COALESCE(:listing_sub_type, listing_sub_type),
+                broker_name=COALESCE(:broker_name, broker_name),
+                has_3d_tour=COALESCE(:has_3d_tour, has_3d_tour)
             WHERE zillow_id=:zillow_id
-        """, {**listing, 'last_seen': now})
+        """, {**row, 'last_seen': now})
 
     conn.commit()
     return result
+
+
+def update_detail_data(conn, zillow_id: str, detail: dict):
+    """Persist property detail enrichment fields."""
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE listings SET
+            year_built      = COALESCE(:year_built, year_built),
+            zestimate       = COALESCE(:zestimate, zestimate),
+            tax_annual      = COALESCE(:tax_annual, tax_annual),
+            garage_spaces   = COALESCE(:garage_spaces, garage_spaces),
+            has_garage      = COALESCE(:has_garage, has_garage),
+            parking_type    = COALESCE(:parking_type, parking_type),
+            school_elementary = COALESCE(:school_elementary, school_elementary),
+            school_middle   = COALESCE(:school_middle, school_middle),
+            school_high     = COALESCE(:school_high, school_high),
+            has_virtual_tour = COALESCE(:has_virtual_tour, has_virtual_tour),
+            open_house_start = COALESCE(:open_house_start, open_house_start),
+            listing_agent   = COALESCE(:listing_agent, listing_agent)
+        WHERE zillow_id = :zillow_id
+    """, {**detail, 'zillow_id': zillow_id})
+
+    # Insert historical price events from the detail page
+    for h in detail.get('price_history_raw', []):
+        if not h.get('price'):
+            continue
+        # Only insert if this event date isn't already recorded
+        existing = cur.execute(
+            "SELECT 1 FROM price_history WHERE zillow_id=? AND event_date=? AND price=?",
+            (zillow_id, h['date'], h['price'])
+        ).fetchone()
+        if not existing:
+            cur.execute(
+                "INSERT INTO price_history (zillow_id, price, event, event_date) VALUES (?,?,?,?)",
+                (zillow_id, h['price'], h.get('event', ''), h.get('date', ''))
+            )
+
+    conn.commit()
 
 
 def mark_inactive(conn, zillow_ids_seen: set):

@@ -85,6 +85,15 @@
             {{ l.flood_risk_label }}
           </span>
           {% endif %}
+          {% if l.listing_sub_type and l.listing_sub_type != 'standard' %}
+          <span class="badge badge-subtype badge-subtype-{{ l.listing_sub_type }}"
+                title="{{ l.listing_sub_type | replace('_', ' ') | title }}">
+            {{ l.listing_sub_type | replace('_', ' ') | title }}
+          </span>
+          {% endif %}
+          {% if l.has_3d_tour or l.has_virtual_tour %}
+          <span class="badge badge-tour" title="Virtual/3D tour available">3D</span>
+          {% endif %}
         </div>
 
         <a href="{{ url_for('listing_detail', zillow_id=l.zillow_id) }}">
@@ -112,6 +121,16 @@
           {% endif %}
           {% if l.dom is not none %}
           <div class="listing-dom">{{ l.dom }}d on market</div>
+          {% endif %}
+          {% if l.garage_spaces %}
+          <div class="listing-garage">{{ l.garage_spaces }}-car garage</div>
+          {% elif l.has_garage %}
+          <div class="listing-garage">Garage</div>
+          {% endif %}
+          {% if l.zestimate %}
+          <div class="listing-zestimate" title="Zillow Estimate">
+            Zest: ${{ '{:,}'.format(l.zestimate) }}
+          </div>
           {% endif %}
 
           <!-- ML Score bar -->

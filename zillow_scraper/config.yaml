@@ -4,12 +4,14 @@ search:
   center_lat: 29.7604
   center_lon: -95.3698
   radius_miles: 50
-  # Precomputed 50-mile bounding box (recalculated at startup if changed)
+  # Precomputed 50-mile bounding box
   bounds:
     north: 30.483
     south: 29.037
     east: -94.538
     west: -96.202
+  # Map zoom level sent to Zillow API (higher = more zoomed in, fewer but more accurate results)
+  zoom_level: 9
 
 filters:
   price_min: 250000
@@ -24,7 +26,17 @@ filters:
 
 alerts:
   price_drop_pct: 5.0       # alert when price drops >= this %
-  price_drop_min_usd: 10000  # alert when price drops >= this USD amount (either triggers)
+  price_drop_min_usd: 10000  # alert when price drops >= this USD (either triggers)
+
+# Optional: rotating residential proxy (highly recommended for production)
+# Format: "http://user:pass@host:port" or leave empty
+proxy: ""
+
+# Fetch individual property pages to enrich with garage, taxes, schools, etc.
+# Adds ~2-3s per NEW listing. Recommended: true
+detail_enrichment: true
+# Max listings to enrich per run (null = all new listings)
+detail_enrichment_limit: 50
 
 scheduler:
   interval_days: 7
