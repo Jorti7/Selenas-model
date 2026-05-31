@@ -1,0 +1,153 @@
+{% extends "layout.html" %}
+{% block title %}Dashboard — Houston Home Finder{% endblock %}
+
+{% block content %}
+<div class="page-wrap">
+
+  <!-- Sidebar Filters -->
+  <aside class="sidebar">
+    <h3>Filters</h3>
+    <form method="GET" action="/">
+      <label>Min Price
+        <input type="number" name="min_price" value="{{ filters.get('min_price', 250000) }}" step="5000"/>
+      </label>
+      <label>Max Price
+        <input type="number" name="max_price" value="{{ filters.get('max_price', 450000) }}" step="5000"/>
+      </label>
+      <label>Min Beds
+        <select name="min_beds">
+          {% for n in [2,3,4,5] %}
+          <option value="{{ n }}" {% if filters.get('min_beds', 3) == n %}selected{% endif %}>{{ n }}+</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Max HOA/mo
+        <input type="number" name="max_hoa" value="{{ filters.get('max_hoa', 150) }}" step="25"/>
+      </label>
+      <label>Flood Risk
+        <select name="flood_risk">
+          <option value="">All</option>
+          {% for r in ['Minimal','Low','Moderate','High','Very High','Unknown'] %}
+          <option value="{{ r }}" {% if filters.get('flood_risk') == r %}selected{% endif %}>{{ r }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Sort By
+        <select name="sort">
+          {% for s, label in [('ml_score','Best Match'),('price','Price'),('dom','Days on Market'),('first_seen','Newest to Us'),('lot_sqft','Lot Size')] %}
+          <option value="{{ s }}" {% if sort == s %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button type="submit" class="btn btn-primary">Apply</button>
+      <a href="/" class="btn btn-ghost">Reset</a>
+    </form>
+
+    {% if stats %}
+    <div class="run-stats">
+      <h4>Last Scrape</h4>
+      {% set last = stats[0] %}
+      <div class="stat-row"><span>Run #{{ last.run_id }}</span></div>
+      <div class="stat-row"><span>{{ last.listings_found }} found</span></div>
+      <div class="stat-row"><span>{{ last.new_listings }} new</span></div>
+      {% if last.price_drops %}<div class="stat-row alert-text">{{ last.price_drops }} price drops</div>{% endif %}
+      {% if last.relistings %}<div class="stat-row alert-text">{{ last.relistings }} relistings</div>{% endif %}
+    </div>
+    {% endif %}
+  </aside>
+
+  <!-- Main Listing Grid -->
+  <section class="listing-grid-wrap">
+    <div class="grid-header">
+      <h2>{{ total }} Active Listings</h2>
+      <span class="page-info">Page {{ page }} &mdash; showing {{ listings|length }} of {{ total }}</span>
+    </div>
+
+    {% if not listings %}
+    <div class="empty-state">
+      <p>No listings found. <button id="btn-run-scraper-inline" class="btn btn-primary">Run the scraper</button> to fetch listings.</p>
+    </div>
+    {% endif %}
+
+    <div class="listing-grid">
+      {% for l in listings %}
+      <article class="listing-card {% if l.user_score == 1 %}liked{% elif l.user_score == -1 %}disliked{% endif %}"
+               data-id="{{ l.zillow_id }}">
+
+        <!-- Badges -->
+        <div class="badge-row">
+          {% if l.relisted_from_id %}
+          <span class="badge badge-relist" title="Was off market {{ l.days_off_market }} days">Relisted</span>
+          {% endif %}
+          {% if l.flood_risk_label %}
+          <span class="badge badge-flood badge-flood-{{ l.flood_risk_label | lower | replace(' ', '-') }}"
+                title="Flood zone: {{ l.flood_zone or 'N/A' }} | BFE: {{ l.bfe or 'N/A' }} | FFE: {{ l.ffe or 'N/A' }}">
+            {{ l.flood_risk_label }}
+          </span>
+          {% endif %}
+        </div>
+
+        <a href="{{ url_for('listing_detail', zillow_id=l.zillow_id) }}">
+          {% if l.thumbnail_url %}
+          <img class="listing-thumb" src="{{ l.thumbnail_url }}" alt="{{ l.address }}" loading="lazy"/>
+          {% else %}
+          <div class="listing-thumb placeholder">No Photo</div>
+          {% endif %}
+        </a>
+
+        <div class="listing-body">
+          <div class="listing-price">
+            ${{ '{:,}'.format(l.price) }}
+            {% if l.relisted_from_id %}<span class="relist-flag" title="Relisted">&#8635;</span>{% endif %}
+          </div>
+          <div class="listing-address">{{ l.address }}, {{ l.city }}</div>
+          <div class="listing-meta">
+            <span>{{ l.beds }}bd</span>
+            <span>{{ l.baths }}ba</span>
+            {% if l.living_sqft %}<span>{{ '{:,}'.format(l.living_sqft) }} sqft</span>{% endif %}
+            {% if l.lot_sqft %}<span>{{ '{:,}'.format(l.lot_sqft) }} lot</span>{% endif %}
+          </div>
+          {% if l.hoa_monthly %}
+          <div class="listing-hoa">HOA: ${{ l.hoa_monthly }}/mo</div>
+          {% endif %}
+          {% if l.dom is not none %}
+          <div class="listing-dom">{{ l.dom }}d on market</div>
+          {% endif %}
+
+          <!-- ML Score bar -->
+          <div class="score-bar-wrap" title="Match score: {{ (l.ml_score * 100)|int }}%">
+            <div class="score-bar" style="width: {{ (l.ml_score * 100)|int }}%"></div>
+          </div>
+
+          <!-- Like / Dislike -->
+          <div class="feedback-row">
+            <button class="btn-feedback btn-like {% if l.user_score == 1 %}active{% endif %}"
+                    data-id="{{ l.zillow_id }}" data-action="like" title="Like">&#10003;</button>
+            <button class="btn-feedback btn-neutral {% if l.user_score == 0 %}active{% endif %}"
+                    data-id="{{ l.zillow_id }}" data-action="neutral" title="Neutral">&#8942;</button>
+            <button class="btn-feedback btn-dislike {% if l.user_score == -1 %}active{% endif %}"
+                    data-id="{{ l.zillow_id }}" data-action="dislike" title="Dislike">&#10007;</button>
+            <a href="{{ l.listing_url }}" target="_blank" class="btn-zillow" title="View on Zillow">Z</a>
+          </div>
+        </div>
+
+      </article>
+      {% endfor %}
+    </div>
+
+    <!-- Pagination -->
+    {% if total > per_page %}
+    <div class="pagination">
+      {% if page > 1 %}
+      <a href="?page={{ page - 1 }}&sort={{ sort }}" class="btn btn-ghost">Prev</a>
+      {% endif %}
+      <span>{{ page }} / {{ ((total / per_page)|int) + (1 if total % per_page else 0) }}</span>
+      {% if page * per_page < total %}
+      <a href="?page={{ page + 1 }}&sort={{ sort }}" class="btn btn-ghost">Next</a>
+      {% endif %}
+    </div>
+    {% endif %}
+
+  </section>
+</div>
+{% endblock %}

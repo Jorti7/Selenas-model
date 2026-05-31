@@ -1,0 +1,38 @@
+# Houston Zillow Scraper Configuration
+
+search:
+  center_lat: 29.7604
+  center_lon: -95.3698
+  radius_miles: 50
+  # Precomputed 50-mile bounding box (recalculated at startup if changed)
+  bounds:
+    north: 30.483
+    south: 29.037
+    east: -94.538
+    west: -96.202
+
+filters:
+  price_min: 250000
+  price_max: 450000
+  min_beds: 3
+  min_baths: 2
+  min_lot_sqft: 5000
+  max_hoa_monthly: 150
+  max_days_on_market: 90
+  home_types:
+    - "SINGLE_FAMILY"
+
+alerts:
+  price_drop_pct: 5.0       # alert when price drops >= this %
+  price_drop_min_usd: 10000  # alert when price drops >= this USD amount (either triggers)
+
+scheduler:
+  interval_days: 7
+
+database:
+  path: "data/zillow.db"
+
+flask:
+  host: "0.0.0.0"
+  port: 5000
+  debug: false

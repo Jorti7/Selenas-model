@@ -1,0 +1,161 @@
+{% extends "layout.html" %}
+{% block title %}{{ listing.address }} — Houston Home Finder{% endblock %}
+
+{% block content %}
+<div class="detail-wrap">
+  <a href="/" class="back-link">&larr; Back to listings</a>
+
+  <div class="detail-header">
+    <div>
+      <h1>{{ listing.address }}</h1>
+      <p class="detail-city">{{ listing.city }}, TX {{ listing.zip_code }}</p>
+    </div>
+    <div class="detail-price">${{ '{:,}'.format(listing.price) }}</div>
+  </div>
+
+  <!-- Badges -->
+  <div class="badge-row">
+    {% if listing.relisted_from_id %}
+    <span class="badge badge-relist">Relisted &mdash; was off market {{ listing.days_off_market }} days</span>
+    {% endif %}
+    {% if listing.flood_risk_label %}
+    <span class="badge badge-flood badge-flood-{{ listing.flood_risk_label | lower | replace(' ', '-') }}">
+      Flood: {{ listing.flood_risk_label }}
+    </span>
+    {% endif %}
+  </div>
+
+  <div class="detail-grid">
+    <!-- Left: photo + key facts -->
+    <div class="detail-left">
+      {% if listing.thumbnail_url %}
+      <img src="{{ listing.thumbnail_url }}" alt="{{ listing.address }}" class="detail-photo"/>
+      {% endif %}
+
+      <div class="fact-grid">
+        <div class="fact"><label>Beds</label><span>{{ listing.beds }}</span></div>
+        <div class="fact"><label>Baths</label><span>{{ listing.baths }}</span></div>
+        <div class="fact"><label>Living Area</label><span>{{ '{:,}'.format(listing.living_sqft or 0) }} sqft</span></div>
+        <div class="fact"><label>Lot Size</label><span>{{ '{:,}'.format(listing.lot_sqft or 0) }} sqft</span></div>
+        <div class="fact"><label>Year Built</label><span>{{ listing.year_built or 'N/A' }}</span></div>
+        <div class="fact"><label>HOA / mo</label><span>{% if listing.hoa_monthly %}${{ listing.hoa_monthly }}{% else %}None{% endif %}</span></div>
+        <div class="fact"><label>Days on Market</label><span>{{ listing.dom or 'N/A' }}</span></div>
+        <div class="fact"><label>List Date</label><span>{{ listing.list_date or 'N/A' }}</span></div>
+        <div class="fact"><label>Match Score</label><span>{{ (listing.ml_score * 100)|int }}%</span></div>
+      </div>
+
+      <a href="{{ listing.listing_url }}" target="_blank" class="btn btn-primary btn-full">View on Zillow &rarr;</a>
+    </div>
+
+    <!-- Right: flood details + price chart + feedback -->
+    <div class="detail-right">
+
+      <!-- Flood Risk Panel -->
+      <div class="flood-panel flood-{{ listing.flood_risk_label | lower | replace(' ', '-') if listing.flood_risk_label else 'unknown' }}">
+        <h3>Flood Risk Assessment</h3>
+        <div class="fact-grid">
+          <div class="fact"><label>FEMA Zone</label><span>{{ listing.flood_zone or 'Unknown' }}</span></div>
+          <div class="fact"><label>Base Flood Elev. (BFE)</label>
+            <span>{% if listing.bfe %}{{ listing.bfe }} ft{% else %}N/A{% endif %}</span></div>
+          <div class="fact"><label>Finished Floor Elev. (FFE)</label>
+            <span>{% if listing.ffe %}{{ listing.ffe }} ft{% else %}
+              <em>Unavailable — request elevation certificate</em>
+            {% endif %}</span></div>
+          <div class="fact"><label>Freeboard (FFE &minus; BFE)</label>
+            <span>{% if listing.freeboard is not none %}{{ listing.freeboard }} ft{% else %}N/A{% endif %}</span></div>
+          <div class="fact"><label>Risk Level</label>
+            <span class="risk-label risk-{{ listing.flood_risk_label | lower | replace(' ', '-') if listing.flood_risk_label else 'unknown' }}">
+              {{ listing.flood_risk_label or 'Unknown' }}
+            </span></div>
+        </div>
+        {% if listing.flood_zone in ('AE', 'A', 'AH', 'AO', 'V', 'VE') %}
+        <p class="flood-note">This property is in a high-risk SFHA flood zone. Flood insurance is mandatory for federally-backed mortgages. Request an elevation certificate to determine actual risk vs BFE.</p>
+        {% endif %}
+      </div>
+
+      <!-- Price History Chart -->
+      <div class="price-chart-panel">
+        <h3>Price History</h3>
+        {% if history|length > 1 %}
+        <canvas id="priceChart" width="400" height="180"></canvas>
+        <script>
+          window._priceHistory = {{ history | tojson }};
+        </script>
+        {% else %}
+        <p class="muted">Only one price recorded so far.</p>
+        {% endif %}
+      </div>
+
+      <!-- Relisting info -->
+      {% if listing.relisted_from_id %}
+      <div class="relist-panel">
+        <h3>Relisting Detected</h3>
+        <p>This property was previously listed as <strong>{{ listing.relisted_from_id }}</strong> and was off the market for <strong>{{ listing.days_off_market }} days</strong> before being relisted.</p>
+        <p class="muted">Common reasons: failed inspection, financing fall-through, pricing correction, or agent switch. Exercise additional due diligence.</p>
+      </div>
+      {% endif %}
+
+      <!-- Feedback -->
+      <div class="feedback-panel">
+        <h3>Your Rating</h3>
+        <div class="feedback-row-large">
+          <button class="btn-feedback btn-like {% if listing.user_score == 1 %}active{% endif %}"
+                  data-id="{{ listing.zillow_id }}" data-action="like">
+            &#10003; Like
+          </button>
+          <button class="btn-feedback btn-neutral {% if listing.user_score == 0 %}active{% endif %}"
+                  data-id="{{ listing.zillow_id }}" data-action="neutral">
+            &mdash; Neutral
+          </button>
+          <button class="btn-feedback btn-dislike {% if listing.user_score == -1 %}active{% endif %}"
+                  data-id="{{ listing.zillow_id }}" data-action="dislike">
+            &#10007; Dislike
+          </button>
+        </div>
+        <p class="muted">Rating trains the match score algorithm.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  // Draw price history sparkline
+  (function() {
+    var h = window._priceHistory;
+    if (!h || h.length < 2) return;
+    var canvas = document.getElementById('priceChart');
+    if (!canvas) return;
+    var ctx = canvas.getContext('2d');
+    var W = canvas.width, H = canvas.height;
+    var prices = h.map(function(p) { return p.price; });
+    var dates = h.map(function(p) { return p.recorded_at.substring(0,10); });
+    var minP = Math.min.apply(null, prices);
+    var maxP = Math.max.apply(null, prices);
+    var pad = 40;
+    function px(i) { return pad + (i / (prices.length - 1)) * (W - pad * 2); }
+    function py(v) { return H - pad - ((v - minP) / (maxP - minP + 1)) * (H - pad * 2); }
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    prices.forEach(function(p, i) {
+      if (i === 0) ctx.moveTo(px(i), py(p));
+      else ctx.lineTo(px(i), py(p));
+    });
+    ctx.stroke();
+    ctx.fillStyle = '#2563eb';
+    prices.forEach(function(p, i) {
+      ctx.beginPath();
+      ctx.arc(px(i), py(p), 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#374151';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('$' + p.toLocaleString(), px(i) - 20, py(p) - 8);
+      ctx.fillStyle = '#6b7280';
+      ctx.fillText(dates[i], px(i) - 20, H - 10);
+      ctx.fillStyle = '#2563eb';
+    });
+  })();
+</script>
+{% endblock %}
